@@ -17,6 +17,7 @@
 import argparse
 import os
 from os import path
+import logging
 
 import yaml
 
@@ -73,8 +74,6 @@ class Arguments:
             # reload cmd args again
             for arg_key, arg_val in cmd_args_dict.items():
                 setattr(self, arg_key, arg_val)
-
-
     def load_yaml_config(self, yaml_path):
         with open(yaml_path, "r") as stream:
             try:
@@ -147,7 +146,7 @@ class Arguments:
             else:
                 pass
             
-        if hasattr(self, "training_type") and training_type is None:
+        if hasattr(self, "training_type"):
             training_type = self.training_type
 
         if training_type == FEDML_TRAINING_PLATFORM_CROSS_SILO:
@@ -156,6 +155,7 @@ class Arguments:
                 and self.scenario == FEDML_CROSS_SILO_SCENARIO_HIERARCHICAL
             ):
                 # Add extra configs specific to silos or server
+                self.rank = int(self.rank)
                 if self.rank == 0:
                     extra_config_path = self.server_config_path
                 else:

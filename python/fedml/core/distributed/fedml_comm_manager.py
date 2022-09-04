@@ -1,7 +1,6 @@
 import logging
 from abc import abstractmethod
 
-
 from .communication.base_com_manager import BaseCommunicationManager
 from .communication.constants import CommunicationConstants
 from .communication.observer import Observer
@@ -36,8 +35,15 @@ class FedMLCommManager(Observer):
             "receive_message. msg_type = %s, sender_id = %d, receiver_id = %d"
             % (str(msg_type), msg_params.get_sender_id(), msg_params.get_receiver_id())
         )
-        handler_callback_func = self.message_handler_dict[msg_type]
-        handler_callback_func(msg_params)
+        try:
+            handler_callback_func = self.message_handler_dict[msg_type]
+            handler_callback_func(msg_params)
+        except KeyError:
+            raise Exception(
+                "KeyError. msg_type = {}. Please check whether you launch the server or client with the correct args.rank".format(
+                    msg_type
+                )
+            )
 
     def send_message(self, message):
         self.com_manager.send_message(message)
@@ -75,13 +81,6 @@ class FedMLCommManager(Observer):
             from .communication.mpi.com_manager import MpiCommunicationManager
 
             self.com_manager = MpiCommunicationManager(self.comm, self.rank, self.size)
-        elif self.backend == "MQTT":
-            from .communication.mqtt.mqtt_comm_manager import MqttCommManager
-
-            HOST = "0.0.0.0"
-            # HOST = "broker.emqx.io"
-            PORT = 1883
-            self.com_manager = MqttCommManager(HOST, PORT, client_id=self.rank, client_num=self.size - 1)
         elif self.backend == "MQTT_S3":
             from .communication.mqtt_s3.mqtt_s3_multi_clients_comm_manager import MqttS3MultiClientsCommManager
 

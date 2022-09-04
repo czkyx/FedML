@@ -1,7 +1,7 @@
 import json
 import logging
 
-import multiprocess as multiprocessing
+from multiprocessing import Process
 import os
 import platform
 import shutil
@@ -464,7 +464,7 @@ class FedMLClientRunner:
                 agent_config=self.agent_config, edge_id=self.edge_id
             )
             client_runner.device_status = ClientConstants.MSG_MLOPS_SERVER_DEVICE_STATUS_FAILED
-            multiprocessing.Process(target=client_runner.cleanup_client_with_status).start()
+            Process(target=client_runner.cleanup_client_with_status).start()
 
     def on_client_mqtt_disconnected(self, mqtt_client_object):
         if self.client_mqtt_lock is None:
@@ -558,7 +558,7 @@ class FedMLClientRunner:
         client_runner = FedMLClientRunner(
             self.args, edge_id=self.edge_id, request_json=request_json, agent_config=self.agent_config, run_id=run_id
         )
-        self.process = multiprocessing.Process(target=client_runner.run)
+        self.process = Process(target=client_runner.run)
         self.process.start()
         ClientConstants.save_run_process(self.process.pid)
 
@@ -577,7 +577,7 @@ class FedMLClientRunner:
             self.args, edge_id=self.edge_id, request_json=request_json, agent_config=self.agent_config, run_id=run_id
         )
         try:
-            multiprocessing.Process(target=client_runner.stop_run).start()
+            Process(target=client_runner.stop_run).start()
         except Exception as e:
             pass
 
@@ -596,7 +596,7 @@ class FedMLClientRunner:
             self.args, edge_id=self.edge_id, request_json=request_json, agent_config=self.agent_config, run_id=run_id
         )
         try:
-            multiprocessing.Process(target=client_runner.exit_run_with_exception).start()
+            Process(target=client_runner.exit_run_with_exception).start()
         except Exception as e:
             pass
 
@@ -631,7 +631,7 @@ class FedMLClientRunner:
                 run_id=run_id,
             )
             client_runner.device_status = status
-            multiprocessing.Process(target=client_runner.cleanup_client_with_status).start()
+            Process(target=client_runner.cleanup_client_with_status).start()
 
     def report_client_status(self):
         self.send_agent_active_msg()
@@ -654,17 +654,42 @@ class FedMLClientRunner:
         if edge_id is not None:
             self.client_active_list[edge_id] = status
 
+    @staticmethod
+    def process_ota_upgrade_msg():
+        os.system("pip install -U fedml")
+
+    def callback_client_ota_msg(self, topic, payload):
+        request_json = json.loads(payload)
+        cmd = request_json["cmd"]
+
+        if cmd == ClientConstants.FEDML_OTA_CMD_UPGRADE:
+            try:
+                Process(target=FedMLClientRunner.process_ota_upgrade_msg).start()
+            except Exception as e:
+                pass
+        elif cmd == ClientConstants.FEDML_OTA_CMD_RESTART:
+            raise Exception("Restart runner...")
+
     def save_training_status(self, edge_id, training_status):
         self.current_training_status = training_status
         ClientConstants.save_training_infos(edge_id, training_status)
 
     @staticmethod
     def get_device_id():
-        file_for_device_id = os.path.join(ClientConstants.get_data_dir(), ClientConstants.LOCAL_RUNNER_INFO_DIR_NAME, "devices.id")
+        device_file_path = os.path.join(ClientConstants.get_data_dir(),
+                                        ClientConstants.LOCAL_RUNNER_INFO_DIR_NAME)
+        file_for_device_id = os.path.join(device_file_path, "devices.id")
+        if not os.path.exists(device_file_path):
+            os.makedirs(device_file_path)
+        elif os.path.exists(file_for_device_id):
+            with open(file_for_device_id, 'r', encoding='utf-8') as f:
+                device_id_from_file = f.readline()
+                if device_id_from_file is not None and device_id_from_file != "":
+                    return device_id_from_file
 
-        sys_name = platform.system()
-        if sys_name == "Darwin":
-            cmd_get_serial_num = "system_profiler SPHardwareDataType | grep Serial | awk '{gsub(/ /,\"\")}{print}' |awk -F':' '{print $2}'"
+        if platform.system() == "Darwin":
+            cmd_get_serial_num = "system_profiler SPHardwareDataType | grep Serial | awk '{gsub(/ /,\"\")}{print}' " \
+                                 "|awk -F':' '{print $2}' "
             device_id = os.popen(cmd_get_serial_num).read()
             device_id = device_id.replace('\n', '').replace(' ', '')
             if device_id is None or device_id == "":
@@ -695,23 +720,13 @@ class FedMLClientRunner:
                 )
                 device_id = hex(device_id)
 
-        device_file_path = os.path.join(ClientConstants.get_data_dir(), ClientConstants.LOCAL_RUNNER_INFO_DIR_NAME)
-        if not os.path.exists(device_file_path):
-            os.makedirs(device_file_path)
         if device_id is not None and device_id != "":
             with open(file_for_device_id, 'w', encoding='utf-8') as f:
                 f.write(device_id)
         else:
-            device_id_from_file = None
-            if os.path.exists(file_for_device_id):
-                with open(file_for_device_id, 'r', encoding='utf-8') as f:
-                    device_id_from_file = f.readline()
-            if device_id_from_file is not None and device_id_from_file != "":
-                device_id = device_id_from_file
-            else:
-                device_id = hex(uuid.uuid4())
-                with open(file_for_device_id, 'w', encoding='utf-8') as f:
-                    f.write(device_id)
+            device_id = hex(uuid.uuid4())
+            with open(file_for_device_id, 'w', encoding='utf-8') as f:
+                f.write(device_id)
 
         return device_id
 
@@ -789,15 +804,6 @@ class FedMLClientRunner:
     def on_agent_mqtt_connected(self, mqtt_client_object):
         # The MQTT message topic format is as follows: <sender>/<receiver>/<action>
 
-        # Init the mlops metrics object
-        if self.mlops_metrics is None:
-            self.mlops_metrics = MLOpsMetrics()
-            self.mlops_metrics.set_messenger(self.mqtt_mgr)
-            self.mlops_metrics.report_client_training_status(self.edge_id, ClientConstants.MSG_MLOPS_CLIENT_STATUS_IDLE)
-            MLOpsStatus.get_instance().set_client_agent_status(
-                self.edge_id, ClientConstants.MSG_MLOPS_CLIENT_STATUS_IDLE
-            )
-
         # Setup MQTT message listener for starting training
         topic_start_train = "flserver_agent/" + str(self.edge_id) + "/start_train"
         self.mqtt_mgr.add_message_listener(topic_start_train, self.callback_start_train)
@@ -826,6 +832,10 @@ class FedMLClientRunner:
         topic_active_msg = "/flclient/active"
         self.mqtt_mgr.add_message_listener(topic_active_msg, self.callback_client_active_msg)
 
+        # Setup MQTT message listener to OTA messages from the MLOps.
+        topic_ota_msg = "/mlops/flclient_agent_" + str(self.edge_id) + "/ota"
+        self.mqtt_mgr.add_message_listener(topic_ota_msg, self.callback_client_ota_msg)
+
         # Subscribe topics for starting train, stopping train and fetching client status.
         mqtt_client_object.subscribe(topic_start_train)
         mqtt_client_object.subscribe(topic_stop_train)
@@ -834,9 +844,10 @@ class FedMLClientRunner:
         mqtt_client_object.subscribe(topic_last_will_msg)
         mqtt_client_object.subscribe(topic_active_msg)
         mqtt_client_object.subscribe(topic_exit_train_with_exception)
+        mqtt_client_object.subscribe(topic_ota_msg)
 
         # Broadcast the first active message.
-        self.send_agent_active_msg()
+        # self.send_agent_active_msg()
 
         # Echo results
         click.echo("")
@@ -872,9 +883,19 @@ class FedMLClientRunner:
         self.mqtt_mgr.add_disconnected_listener(self.on_agent_mqtt_disconnected)
         self.mqtt_mgr.connect()
 
+        self.setup_client_mqtt_mgr()
+        self.wait_client_mqtt_connected()
+        self.mlops_metrics.report_client_training_status(self.edge_id,
+                                                         ClientConstants.MSG_MLOPS_CLIENT_STATUS_IDLE)
+        MLOpsStatus.get_instance().set_client_agent_status(self.edge_id, ClientConstants.MSG_MLOPS_CLIENT_STATUS_IDLE)
+        self.release_client_mqtt_mgr()
+
     def start_agent_mqtt_loop(self):
         # Start MQTT message loop
         try:
             self.mqtt_mgr.loop_forever()
         except Exception as e:
             pass
+
+
+

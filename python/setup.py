@@ -23,7 +23,6 @@ requirements = [
     "PyYAML",
     "h5py",
     "tqdm",
-    "wandb",
     "wget",
     "paho-mqtt",
     "boto3",
@@ -38,7 +37,10 @@ requirements = [
     "multiprocess",
     "smart-open==5.2.1",
     "nvidia-ml-py3",
-    "matplotlib"
+    "matplotlib",
+    "dill",
+    "pandas",
+    "wandb==0.13.2"
 ]
 
 requirements_extra_mpi = [
@@ -48,14 +50,28 @@ requirements_extra_mpi = [
 requirements_extra_tf = [
     "tensorflow",
     "tensorflow_datasets",
+    "tensorflow_federated",
 ]
+
+requirements_extra_jax = [
+    "jax[cpu]",
+    "dm-haiku",
+    "optax",
+    "jaxlib"
+]
+
+# https://github.com/apache/incubator-mxnet/issues/18329
+requirements_extra_mxnet = [
+    "mxnet==2.0.0b1"
+]
+
 
 if platform.machine() == "x86_64":
     requirements.append("MNN==1.1.6")
 
 setup(
     name="fedml",
-    version="0.7.290",
+    version="0.7.305",
     author="FedML Team",
     author_email="ch@fedml.ai",
     description="A research and production integrated edge-cloud library for "
@@ -110,6 +126,8 @@ setup(
         "MPI": requirements_extra_mpi,
         "gRPC": "grpcio",
         "tensorflow": requirements_extra_tf,
+        "jax": requirements_extra_jax,
+        "mxnet": requirements_extra_mxnet,
     },
     package_data={"": ["py.typed"]},
     license="Apache 2.0",

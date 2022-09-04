@@ -57,7 +57,7 @@ class MLOpsStore:
     mlops_log_mqtt_mgr = None
     mlops_log_mqtt_lock = None
     mlops_log_mqtt_is_connected = False
-    mlops_log_agent_config = None
+    mlops_log_agent_config = dict()
     mlops_metrics = None
     mlops_event = None
     mlops_bind_result = False
@@ -172,7 +172,7 @@ def log(metrics: dict, commit=True):
         #     k = "round_idx_" + k
         MLOpsStore.mlops_log_metrics[k] = v
     MLOpsStore.mlops_log_metrics["run_id"] = str(MLOpsStore.mlops_run_id)
-    MLOpsStore.mlops_log_metrics["timestamp"] = time.time()
+    MLOpsStore.mlops_log_metrics["timestamp"] = float(time.time_ns()/1000/1000*1.0)
     MLOpsStore.mlops_log_metrics_lock.release()
 
     logging.info("log metrics {}".format(json.dumps(MLOpsStore.mlops_log_metrics)))
@@ -265,6 +265,8 @@ def log_training_finished_status(run_id=None):
 
     setup_log_mqtt_mgr()
     wait_log_mqtt_connected()
+    MLOpsStore.mlops_metrics.broadcast_client_training_status(MLOpsStore.mlops_edge_id,
+                                                              ClientConstants.MSG_MLOPS_CLIENT_STATUS_FINISHED)
     MLOpsStore.mlops_metrics.report_client_id_status(MLOpsStore.mlops_run_id,
                                                      MLOpsStore.mlops_edge_id,
                                                      ClientConstants.MSG_MLOPS_CLIENT_STATUS_FINISHED)
@@ -289,6 +291,8 @@ def log_training_failed_status(run_id=None):
 
     setup_log_mqtt_mgr()
     wait_log_mqtt_connected()
+    MLOpsStore.mlops_metrics.broadcast_client_training_status(MLOpsStore.mlops_edge_id,
+                                                              ClientConstants.MSG_MLOPS_CLIENT_STATUS_FAILED)
     MLOpsStore.mlops_metrics.report_client_id_status(MLOpsStore.mlops_run_id,
                                                      MLOpsStore.mlops_edge_id,
                                                      ClientConstants.MSG_MLOPS_CLIENT_STATUS_FAILED)
@@ -313,6 +317,8 @@ def log_aggregation_finished_status(run_id=None):
 
     setup_log_mqtt_mgr()
     wait_log_mqtt_connected()
+    MLOpsStore.mlops_metrics.broadcast_server_training_status(MLOpsStore.mlops_run_id,
+                                                              ServerConstants.MSG_MLOPS_SERVER_STATUS_FINISHED)
     MLOpsStore.mlops_metrics.report_server_id_status(MLOpsStore.mlops_run_id,
                                                      ServerConstants.MSG_MLOPS_SERVER_STATUS_FINISHED)
     release_log_mqtt_mgr()
@@ -335,6 +341,8 @@ def log_aggregation_failed_status(run_id=None):
 
     setup_log_mqtt_mgr()
     wait_log_mqtt_connected()
+    MLOpsStore.mlops_metrics.broadcast_server_training_status(MLOpsStore.mlops_run_id,
+                                                              ServerConstants.MSG_MLOPS_SERVER_STATUS_FAILED)
     MLOpsStore.mlops_metrics.report_server_id_status(MLOpsStore.mlops_run_id,
                                                      ServerConstants.MSG_MLOPS_SERVER_STATUS_FAILED)
     release_log_mqtt_mgr()
@@ -571,7 +579,7 @@ def setup_log_mqtt_mgr():
         MLOpsStore.mlops_log_mqtt_mgr = None
         MLOpsStore.mlops_log_mqtt_lock.release()
 
-    if MLOpsStore.mlops_log_agent_config is None:
+    if len(MLOpsStore.mlops_log_agent_config) == 0:
         return
 
     # logging.info(
@@ -693,8 +701,7 @@ def bind_simulation_device(args, userid, version="release"):
         try:
             edge_id = runner.bind_account_and_device_id(
                 service_config["ml_ops_config"]["EDGE_BINDING_URL"],
-                args.account_id, unique_device_id, args.os_name,
-                role="simulator"
+                args.account_id, unique_device_id, args.os_name
             )
             if edge_id > 0:
                 runner.edge_id = edge_id
